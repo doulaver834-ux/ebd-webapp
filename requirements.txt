@@ -1,2 +1,4 @@
 streamlit
 rich
+streamlit
+reportlab
