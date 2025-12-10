@@ -1,8 +1,17 @@
 import streamlit as st
 import math
+import datetime
+import io
+
+# --- PDF Engine Imports ---
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.units import inch
 
 # ==============================================================================
-# 🧠 第一部分：核心算法逻辑 (保持不变，你的大脑)
+# 🧠 第一部分：核心算法逻辑
 # ==============================================================================
 
 class FloorSafetyAudit:
@@ -35,7 +44,7 @@ class FloorSafetyAudit:
 
         if measured_dcof < requirements["min_dcof"]:
             status = "FAIL"
-            notes.append(f"DCOF {measured_dcof:.2f} < 阈值 {requirements['min_dcof']:.2f} ({requirements['standard_ref']})")
+            notes.append(f"DCOF {measured_dcof:.2f} < 阈值 {requirements['min_dcof']:.2f}")
 
         if din_r_value < requirements["min_r"]:
             status = "FAIL"
@@ -97,70 +106,128 @@ class SpatialAudit:
         return {"module": "空间坡度", "status": status, "log": notes}
 
 # ==============================================================================
-# 🎨 第二部分：界面美化 (SCUT Academic Light Theme)
+# 📄 第二部分：PDF 生成引擎
+# ==============================================================================
+
+def generate_audit_report_pdf(context_data):
+    """生成 SCUT 风格的专业 PDF 报告"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('ReportTitle', parent=styles['Heading1'], alignment=1, fontSize=18, spaceAfter=20)
+    subtitle_style = ParagraphStyle('ReportSub', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.gray)
+    
+    elements = []
+    
+    # 1. Header
+    elements.append(Paragraph("EBD Environmental Safety Audit Report", title_style))
+    elements.append(Paragraph(f"Ref ID: SCUT-{datetime.datetime.now().strftime('%Y%m%d-%H%M')}", subtitle_style))
+    elements.append(Paragraph(f"Zone: {context_data['zone_name']}", subtitle_style))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    # 2. Data Table
+    table_data = [['Audit Module', 'Measured Metric', 'Status', 'Notes']]
+    
+    # Row 1: Floor
+    floor = context_data['res_floor']
+    floor_notes = "\n".join(floor['log']) if floor['log'] else "Compliant"
+    table_data.append([
+        "Surface Kinetics", 
+        f"DCOF: {context_data['inputs']['dcof']}\nR-Value: {context_data['inputs']['r_value']}", 
+        floor['status'], 
+        Paragraph(floor_notes, styles['Normal'])
+    ])
+    
+    # Row 2: Light
+    light = context_data['res_light']
+    light_notes = "\n".join(light['log']) if light['log'] else "Compliant"
+    table_data.append([
+        "Photobiological", 
+        f"Measured: {context_data['inputs']['lux']} lx\nTarget: {light.get('target_lux')} lx", 
+        light['status'], 
+        Paragraph(light_notes, styles['Normal'])
+    ])
+    
+    # Row 3: Space
+    space = context_data['res_turn']
+    space_notes = "\n".join(space['log']) if space['log'] else "Compliant"
+    table_data.append([
+        "Spatial Kinematics", 
+        f"Turn Dia: {context_data['inputs']['turn']}mm", 
+        space['status'], 
+        Paragraph(space_notes, styles['Normal'])
+    ])
+
+    # 3. Table Styling
+    t = Table(table_data, colWidths=[1.2*inch, 1.5*inch, 0.8*inch, 2.5*inch])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.whitesmoke),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.dimgray),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    
+    for i, row in enumerate(table_data[1:], start=1):
+        status = row[2]
+        if status == "FAIL":
+            t.setStyle(TableStyle([('TEXTCOLOR', (2, i), (2, i), colors.red)]))
+        elif status == "WARNING":
+            t.setStyle(TableStyle([('TEXTCOLOR', (2, i), (2, i), colors.orange)]))
+        else:
+            t.setStyle(TableStyle([('TEXTCOLOR', (2, i), (2, i), colors.green)]))
+
+    elements.append(t)
+    elements.append(Spacer(1, 0.5 * inch))
+
+    # 4. Certification Text
+    elements.append(Paragraph("Certification Statement:", styles['Heading4']))
+    elements.append(Paragraph(
+        "This automated report is generated based on Evidence-Based Design (EBD) protocols derived from JAMA, The Lancet, and ADA standards.", 
+        styles['Normal']
+    ))
+    
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont('Helvetica-Oblique', 8)
+        canvas.drawString(inch, 0.75 * inch, f"Generated by SCUT-AI Architecture Lab | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        canvas.restoreState()
+
+    doc.build(elements, onFirstPage=add_footer)
+    buffer.seek(0)
+    return buffer
+
+# ==============================================================================
+# 🎨 第三部分：界面美化
 # ==============================================================================
 
 st.set_page_config(page_title="EBD 审查 Pro", page_icon="🏥", layout="wide")
 
-# 注入更清爽的 CSS
 st.markdown("""
 <style>
-    /* 1. 整体背景：干净的灰白 */
-    .stApp {
-        background-color: #F8F9FA;
-        color: #1F2937; /* 深灰字体，清晰易读 */
-    }
-
-    /* 2. 侧边栏：纯白悬浮感 */
-    section[data-testid="stSidebar"] {
-        background-color: #FFFFFF;
-        border-right: 1px solid #E5E7EB;
-        box-shadow: 2px 0 5px rgba(0,0,0,0.02);
-    }
-    
-    /* 3. 标题颜色：专业的医疗/建筑蓝 */
-    h1, h2, h3 {
-        color: #111827 !important;
-        font-family: 'Helvetica Neue', sans-serif;
-    }
-    
-    /* 4. 卡片样式 (Metric & Expanders) - 纯白卡片+轻阴影 */
+    .stApp { background-color: #F8F9FA; color: #1F2937; }
+    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
+    h1, h2, h3 { color: #111827 !important; font-family: 'Helvetica Neue', sans-serif; }
     div[data-testid="stMetric"], div[data-testid="stExpander"] {
-        background-color: #FFFFFF;
-        border: 1px solid #E5E7EB;
-        border-radius: 8px;
-        padding: 15px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    
-    /* 5. 按钮：SCUT 红或专业的蓝色 */
     div.stButton > button {
-        background-color: #2563EB; /* 皇家蓝 */
-        color: white;
-        border-radius: 6px;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-weight: 600;
-        transition: all 0.2s;
+        background-color: #2563EB; color: white; border-radius: 6px; border: none; padding: 0.5rem 1rem; font-weight: 600;
     }
-    div.stButton > button:hover {
-        background-color: #1D4ED8;
-        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
-    }
-
-    /* 6. 状态颜色微调 */
-    div[data-testid="stMetricDelta"] > svg {
-        # 保持红绿箭头清晰
-    }
+    div.stButton > button:hover { background-color: #1D4ED8; }
 </style>
 """, unsafe_allow_html=True)
 
-
 # ==============================================================================
-# 🖥️ 第三部分：界面布局
+# 🖥️ 第四部分：界面布局与交互
 # ==============================================================================
 
-# Header
 col1, col2 = st.columns([1, 6])
 with col1:
     st.markdown("## 🏥")
@@ -170,14 +237,18 @@ with col2:
 
 st.divider()
 
-# --- 侧边栏输入 ---
 with st.sidebar:
     st.header("⚙️ 参数控制台")
-    
-    zone_type = st.selectbox(
-        "空间类型", 
-        ('普通走廊 (Corridor)', '卫生间 (Bathroom)', '室外坡道 (Outdoor Ramp)', '康复水疗 (Therapy Pool)', '餐厅 (Dining)')
-    )
+    zone_map = {
+        '普通走廊 (Corridor)': 'Corridor',
+        '卫生间 (Bathroom)': 'Bathroom',
+        '室外坡道 (Outdoor Ramp)': 'Outdoor Ramp',
+        '康复水疗 (Therapy Pool)': 'Therapy Pool',
+        '餐厅 (Dining)': 'Dining'
+    }
+    zone_selection = st.selectbox("空间类型", list(zone_map.keys()))
+    zone_type = zone_selection
+    zone_name_en = zone_map[zone_selection]
     
     with st.expander("🛡️ 地面参数", expanded=True):
         dcof_input = st.slider("DCOF 摩擦系数", 0.0, 1.0, 0.42, 0.01)
@@ -195,9 +266,7 @@ with st.sidebar:
     st.markdown("---")
     run_audit = st.button("🚀 启动审查", type="primary")
 
-# --- 主体展示区 ---
 if run_audit:
-    # 实例化 & 计算
     floor_auditor = FloorSafetyAudit()
     light_auditor = LightingAudit()
     space_auditor = SpatialAudit()
@@ -209,7 +278,6 @@ if run_audit:
 
     st.subheader(f"📊 审计报告：{zone_type}")
     
-    # 选项卡
     tab1, tab2, tab3 = st.tabs(["🛡️ 地面安全", "💡 光环境", "📐 空间尺度"])
     
     with tab1:
@@ -217,7 +285,6 @@ if run_audit:
         floor_state = "normal" if res_floor['status'] == 'PASS' else "inverse"
         c1.metric("实测 DCOF", f"{dcof_input}", delta="达标" if res_floor['status'] == 'PASS' else "-不达标", delta_color=floor_state)
         c2.metric("要求阈值", f"{res_floor['requirements']['min_dcof']:.2f}")
-        
         if res_floor['status'] == 'PASS':
             st.success("✅ 地面材质符合 EBD 标准")
         else:
@@ -230,7 +297,6 @@ if run_audit:
         light_state = "normal" if res_light['status'] == 'PASS' else "inverse"
         c1.metric("实测照度", f"{lux_input} Lx", delta="舒适" if res_light['status'] == 'PASS' else "-风险", delta_color=light_state)
         c2.metric("目标照度", f"{res_light.get('target_lux')} Lx")
-        
         if res_light['status'] == 'PASS':
             st.success("✅ 光环境适宜")
         else:
@@ -242,7 +308,6 @@ if run_audit:
             st.error(f"❌ {res_turn['log'][0]}")
         else:
             st.success(f"✅ 轮椅回转空间充足 ({turning_dia}mm)")
-            
         if res_slope['status'] == 'FAIL':
             st.error(f"❌ {res_slope['log'][0]}")
         elif res_slope['status'] == 'WARNING':
@@ -250,9 +315,29 @@ if run_audit:
         else:
             st.success("✅ 坡度设计极佳")
 
+    st.markdown("---")
+    pdf_context = {
+        'zone_name': zone_name_en,
+        'inputs': {'dcof': dcof_input, 'r_value': r_value_input, 'lux': lux_input, 'turn': turning_dia},
+        'res_floor': res_floor,
+        'res_light': res_light,
+        'res_turn': res_turn
+    }
+    pdf_file = generate_audit_report_pdf(pdf_context)
+    
+    col_l, col_m, col_r = st.columns([1, 2, 1])
+    with col_m:
+        st.success("📄 报告已生成完毕")
+        st.download_button(
+            label="📥 下载 PDF 正式审查报告 (SCUT Certified)",
+            data=pdf_file,
+            file_name=f"EBD_Audit_{datetime.datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
 else:
     st.info("👈 请在左侧输入参数并点击“启动审查”")
-    # 简单的欢迎占位
     st.markdown("""
     <div style="text-align: center; color: #6B7280; padding: 40px;">
         <h3>系统就绪</h3>
