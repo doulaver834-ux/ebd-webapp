@@ -1,4 +1,2 @@
 streamlit
-rich
-streamlit
 reportlab
