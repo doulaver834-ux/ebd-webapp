@@ -11,33 +11,28 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.units import inch
 
 # ==============================================================================
-# 🧠 第一部分：核心算法逻辑
+# 🧠 第一部分：核心算法逻辑 (Modules 1-3 + Healing)
 # ==============================================================================
 
 class FloorSafetyAudit:
-    """EBD-Audit-Spec v2.0 Module 1: Surface Kinetics Audit"""
+    """Module 1: Surface Kinetics Audit"""
     def __init__(self):
-        self.ANSI_LEVEL_INTERIOR_WET = 0.42
-        self.EBD_WET_RISK_UPLIFT = 0.55
         self.EBD_RAMP_BASE_DCOF = 0.60
 
     def audit_material(self, zone_type, slope_ratio, measured_dcof, din_r_value):
         requirements = {"min_dcof": 0.42, "min_r": 9, "standard_ref": "ANSI A326.3"}
         is_wet_zone = zone_type in ['卫生间 (Bathroom)', '餐厅 (Dining)', '康复水疗 (Therapy Pool)', '室外坡道 (Outdoor Ramp)']
-        is_ramp = slope_ratio > 0.02
-
-        if is_ramp:
+        
+        if slope_ratio > 0.02:
             requirements["min_dcof"] = self.EBD_RAMP_BASE_DCOF + (slope_ratio * 1.5)
             requirements["min_r"] = 11 if slope_ratio < 0.05 else 12
             requirements["standard_ref"] = "EBD Physics + DIN 51130 (Ramp)"
         elif zone_type == '康复水疗 (Therapy Pool)':
             requirements["min_dcof"] = 0.60
             requirements["min_r"] = 12
-            requirements["standard_ref"] = "ANSI Wet Plus / DIN 51097"
         elif is_wet_zone:
-            requirements["min_dcof"] = self.EBD_WET_RISK_UPLIFT
+            requirements["min_dcof"] = 0.55
             requirements["min_r"] = 11
-            requirements["standard_ref"] = "EBD Geriatric Safety Uplift"
 
         notes = []
         status = "PASS"
@@ -50,19 +45,15 @@ class FloorSafetyAudit:
             status = "FAIL"
             notes.append(f"DIN R-Value R{din_r_value} < 阈值 R{requirements['min_r']}")
 
-        if status == "FAIL" and zone_type in ['卫生间 (Bathroom)', '室外坡道 (Outdoor Ramp)']:
-            notes.append("⚠ CRITICAL: 基于 JAMA/Lancet 风险模型，此区域髋部骨折概率极高。")
-
         return {"module": "地面安全", "status": status, "requirements": requirements, "log": notes}
 
 class LightingAudit:
-    """EBD-Audit-Spec v2.0 Module 2: Photobiological Audit"""
+    """Module 2: Photobiological Audit"""
     def __init__(self):
         self.LUX_TARGETS = {
             '餐厅 (Dining)': 500, '阅读区 (Task)': 750, '普通走廊 (Corridor)': 300,
             '卫生间 (Bathroom)': 500, '康复水疗 (Therapy Pool)': 750, '室外坡道 (Outdoor Ramp)': 150
         }
-        self.MAX_ADAPTATION_RATIO = 3.0
 
     def audit_space_lighting(self, zone_type, measured_lux, adjacent_zone_lux=None):
         target_lux = self.LUX_TARGETS.get(zone_type, 300)
@@ -71,276 +62,263 @@ class LightingAudit:
 
         if measured_lux < target_lux:
             status = "FAIL"
-            notes.append(f"照度 {measured_lux} lx < 目标 {target_lux} lx (低照度增加跌倒风险 IRR 0.92)")
+            notes.append(f"照度 {measured_lux} lx < 目标 {target_lux} lx")
 
         if adjacent_zone_lux:
             ratio = max(measured_lux, adjacent_zone_lux) / (min(measured_lux, adjacent_zone_lux) + 0.01)
-            if ratio > self.MAX_ADAPTATION_RATIO:
+            if ratio > 3.0:
                 status = "FAIL"
-                notes.append(f"适应比 {ratio:.1f}:1 > {self.MAX_ADAPTATION_RATIO}:1 (瞬时盲区风险)")
+                notes.append(f"适应比 {ratio:.1f}:1 > 3.0:1 (瞬时盲区风险)")
 
         return {"module": "光环境", "status": status, "target_lux": target_lux, "log": notes}
 
 class SpatialAudit:
-    """EBD-Audit-Spec v2.0 Module 4: Spatial Kinematics Audit"""
-    def __init__(self):
-        self.MIN_TURNING_DIA = 1525.0
-        self.MAX_SLOPE_HARD = 1 / 12.0
-        self.MAX_SLOPE_SOFT = 1 / 20.0
-
+    """Module 4: Spatial Kinematics Audit"""
     def audit_turning_circle(self, clear_width_mm):
-        if clear_width_mm >= self.MIN_TURNING_DIA:
+        if clear_width_mm >= 1525.0:
             return {"module": "空间回转", "status": "PASS", "log": []}
-        else:
-            return {"module": "空间回转", "status": "FAIL", "log": [f"回转直径 {clear_width_mm}mm < 1525mm (电动轮椅碰撞风险)"]}
+        return {"module": "空间回转", "status": "FAIL", "log": [f"回转直径 {clear_width_mm}mm < 1525mm"]}
 
     def audit_ramp_slope(self, slope_ratio):
+        if slope_ratio > 0.0833: # 1:12
+            return {"module": "空间坡度", "status": "FAIL", "log": [f"坡度 {slope_ratio:.3f} > 1:12 (非法)"]}
+        elif slope_ratio > 0.05: # 1:20
+            return {"module": "空间坡度", "status": "WARNING", "log": [f"坡度 {slope_ratio:.3f} 建议优化至 1:20"]}
+        return {"module": "空间坡度", "status": "PASS", "log": []}
+
+# === 🔥 新增模块: 心灵疗愈 (Module 3 - Based on Sun Jingjing/SRT) ===
+class HealingAudit:
+    """EBD-Audit-Spec v2.0 Module 3: Psychosocial Healing Audit"""
+    
+    def calculate_healing_score(self, material_count, view_nature_ratio, dist_care_child, shade_coverage):
+        """
+        计算 SCUT-Healing Score (SHS) 疗愈指数
+        """
         notes = []
-        status = "PASS"
-        if slope_ratio > self.MAX_SLOPE_HARD:
-            status = "FAIL"
-            notes.append(f"坡度 {slope_ratio:.3f} > 1:12 (非法且危险)")
-        elif slope_ratio > self.MAX_SLOPE_SOFT:
-            status = "WARNING"
-            notes.append(f"坡度 {slope_ratio:.3f} 合法但非老年友好 (EBD建议 1:20)")
-        return {"module": "空间坡度", "status": status, "log": notes}
+        
+        # 1. 感官丰富度 (Sensory Entropy) - 倒U型曲线
+        if 3 <= material_count <= 5:
+            score_sensory = 100
+            notes.append(f"✅ 材质丰富度适中 ({material_count}种)，符合 Berlyne 唤醒理论")
+        elif material_count < 3:
+            score_sensory = 60
+            notes.append(f"⚠️ 材质过少 ({material_count}种)，存在感官剥夺风险")
+        else:
+            score_sensory = 70
+            notes.append(f"⚠️ 材质过多 ({material_count}种)，可能导致认知过载")
+
+        # 2. 自然疗愈力 (Biophilic Connection)
+        # 线性插值：30% 及格，100% 满分
+        score_nature = min((view_nature_ratio / 0.3) * 60 + 40, 100)
+        if view_nature_ratio < 0.3:
+            # 如果低于 30%，分数会很低
+            notes.append(f"⚠️ 绿视率 {view_nature_ratio:.0%} < 30%，自然疗愈效能不足")
+        else:
+             notes.append(f"✅ 绿视率 {view_nature_ratio:.0%} 达标")
+
+        # 3. 代际距离 (Intergenerational Distance) - 距离产生美
+        if 6 <= dist_care_child <= 15:
+            score_social = 100
+            notes.append(f"✅ 看护距离 {dist_care_child}m 处于黄金区间 (Visible but not Audible)")
+        else:
+            score_social = 50
+            notes.append(f"⚠️ 看护距离 {dist_care_child}m 不佳 (过近干扰/过远失控)")
+
+        # --- 核心算法：加权总分 ---
+        # 权重：感官(30%) + 自然(40%) + 社交(30%)
+        base_score = 0.3 * score_sensory + 0.4 * score_nature + 0.3 * score_social
+        
+        # --- SCUT 地域性修正 (Shadow Utility) ---
+        # 广州炎热气候特供逻辑
+        final_score = base_score
+        if shade_coverage < 0.4:
+            final_score = base_score * 0.6 # 强制打6折
+            notes.append(f"🚨 [SCUT地域修正] 阴影覆盖率 {shade_coverage:.0%} 过低！严重影响夏季使用，已惩罚。")
+
+        # 评级系统
+        grade = "S" if final_score >= 90 else ("A" if final_score >= 80 else "B")
+        
+        return {
+            "module": "心灵疗愈",
+            "score": round(final_score, 1), 
+            "grade": grade,
+            "log": notes
+        }
 
 # ==============================================================================
-# 📄 第二部分：PDF 生成引擎
+# 📄 第二部分：PDF 生成引擎 (已升级 - 含疗愈数据)
 # ==============================================================================
 
 def generate_audit_report_pdf(context_data):
-    """生成 SCUT 风格的专业 PDF 报告"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
     styles = getSampleStyleSheet()
     
-    title_style = ParagraphStyle('ReportTitle', parent=styles['Heading1'], alignment=1, fontSize=18, spaceAfter=20)
-    subtitle_style = ParagraphStyle('ReportSub', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.gray)
-    
     elements = []
     
-    # 1. Header
-    elements.append(Paragraph("EBD Environmental Safety Audit Report", title_style))
-    elements.append(Paragraph(f"Ref ID: SCUT-{datetime.datetime.now().strftime('%Y%m%d-%H%M')}", subtitle_style))
-    elements.append(Paragraph(f"Zone: {context_data['zone_name']}", subtitle_style))
-    elements.append(Spacer(1, 0.5 * inch))
+    # 标题头
+    elements.append(Paragraph("EBD Environmental Safety Audit Report", styles['Heading1']))
+    elements.append(Paragraph(f"Zone: {context_data['zone_name']} | Ref: SCUT-{datetime.datetime.now().strftime('%H%M')}", styles['Normal']))
+    elements.append(Spacer(1, 0.2 * inch))
 
-    # 2. Data Table
-    table_data = [['Audit Module', 'Measured Metric', 'Status', 'Notes']]
+    # 构建表格数据
+    # Header
+    table_data = [['Audit Module', 'Metrics', 'Status/Score', 'Notes']]
     
-    # Row 1: Floor
-    floor = context_data['res_floor']
-    floor_notes = "\n".join(floor['log']) if floor['log'] else "Compliant"
-    table_data.append([
-        "Surface Kinetics", 
-        f"DCOF: {context_data['inputs']['dcof']}\nR-Value: {context_data['inputs']['r_value']}", 
-        floor['status'], 
-        Paragraph(floor_notes, styles['Normal'])
-    ])
+    # 1. Floor Data
+    f = context_data['res_floor']
+    table_data.append(["Surface Kinetics", f"DCOF: {context_data['inputs']['dcof']}", f['status'], Paragraph("\n".join(f['log']), styles['Normal'])])
     
-    # Row 2: Light
-    light = context_data['res_light']
-    light_notes = "\n".join(light['log']) if light['log'] else "Compliant"
-    table_data.append([
-        "Photobiological", 
-        f"Measured: {context_data['inputs']['lux']} lx\nTarget: {light.get('target_lux')} lx", 
-        light['status'], 
-        Paragraph(light_notes, styles['Normal'])
-    ])
+    # 2. Light Data
+    l = context_data['res_light']
+    table_data.append(["Photobiological", f"Lux: {context_data['inputs']['lux']}", l['status'], Paragraph("\n".join(l['log']), styles['Normal'])])
     
-    # Row 3: Space
-    space = context_data['res_turn']
-    space_notes = "\n".join(space['log']) if space['log'] else "Compliant"
+    # 3. Space Data
+    s = context_data['res_turn']
+    table_data.append(["Spatial", f"Dia: {context_data['inputs']['turn']}mm", s['status'], Paragraph("\n".join(s['log']), styles['Normal'])])
+
+    # 4. Healing Data (New!)
+    h = context_data['res_healing']
+    # 格式化 log 显示
+    h_notes = "<br/>".join(h['log'])
     table_data.append([
-        "Spatial Kinematics", 
-        f"Turn Dia: {context_data['inputs']['turn']}mm", 
-        space['status'], 
-        Paragraph(space_notes, styles['Normal'])
+        "Psychosocial Healing", 
+        f"Grade: {h['grade']}", 
+        f"Score: {h['score']}", 
+        Paragraph(h_notes, styles['Normal'])
     ])
 
-    # 3. Table Styling
+    # 表格样式
     t = Table(table_data, colWidths=[1.2*inch, 1.5*inch, 0.8*inch, 2.5*inch])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.whitesmoke),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.dimgray),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
     ]))
     
-    for i, row in enumerate(table_data[1:], start=1):
-        status = row[2]
-        if status == "FAIL":
-            t.setStyle(TableStyle([('TEXTCOLOR', (2, i), (2, i), colors.red)]))
-        elif status == "WARNING":
-            t.setStyle(TableStyle([('TEXTCOLOR', (2, i), (2, i), colors.orange)]))
-        else:
-            t.setStyle(TableStyle([('TEXTCOLOR', (2, i), (2, i), colors.green)]))
-
     elements.append(t)
+    
+    # 认证落款
     elements.append(Spacer(1, 0.5 * inch))
-
-    # 4. Certification Text
     elements.append(Paragraph("Certification Statement:", styles['Heading4']))
     elements.append(Paragraph(
-        "This automated report is generated based on Evidence-Based Design (EBD) protocols derived from JAMA, The Lancet, and ADA standards.", 
+        "This report integrates physical safety audits (ANSI/ADA) with psychosocial healing metrics (SCUT-SRT).", 
         styles['Normal']
     ))
     
-    def add_footer(canvas, doc):
-        canvas.saveState()
-        canvas.setFont('Helvetica-Oblique', 8)
-        canvas.drawString(inch, 0.75 * inch, f"Generated by SCUT-AI Architecture Lab | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        canvas.restoreState()
-
-    doc.build(elements, onFirstPage=add_footer)
+    doc.build(elements)
     buffer.seek(0)
     return buffer
 
 # ==============================================================================
-# 🎨 第三部分：界面美化
+# 🖥️ 第三部分：界面布局 (已升级 - 含疗愈 Tab)
 # ==============================================================================
 
-st.set_page_config(page_title="EBD 审查 Pro", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="EBD 审查 Pro v2.1", page_icon="🏥", layout="wide")
 
-st.markdown("""
-<style>
-    .stApp { background-color: #F8F9FA; color: #1F2937; }
-    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
-    h1, h2, h3 { color: #111827 !important; font-family: 'Helvetica Neue', sans-serif; }
-    div[data-testid="stMetric"], div[data-testid="stExpander"] {
-        background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    div.stButton > button {
-        background-color: #2563EB; color: white; border-radius: 6px; border: none; padding: 0.5rem 1rem; font-weight: 600;
-    }
-    div.stButton > button:hover { background-color: #1D4ED8; }
-</style>
-""", unsafe_allow_html=True)
-
-# ==============================================================================
-# 🖥️ 第四部分：界面布局与交互
-# ==============================================================================
-
-col1, col2 = st.columns([1, 6])
-with col1:
-    st.markdown("## 🏥")
-with col2:
-    st.title("EBD 康复环境自动化审查系统")
-    st.caption("SCUT Architecture | 基于 JAMA / The Lancet / ADA 实证数据驱动")
-
-st.divider()
+st.title("EBD 康复环境自动化审查系统 v2.1")
+st.caption("SCUT Architecture | 集成物理安全与心理疗愈评估模型 (Based on Sun Jingjing Theory)")
 
 with st.sidebar:
     st.header("⚙️ 参数控制台")
-    zone_map = {
-        '普通走廊 (Corridor)': 'Corridor',
-        '卫生间 (Bathroom)': 'Bathroom',
-        '室外坡道 (Outdoor Ramp)': 'Outdoor Ramp',
-        '康复水疗 (Therapy Pool)': 'Therapy Pool',
-        '餐厅 (Dining)': 'Dining'
-    }
-    zone_selection = st.selectbox("空间类型", list(zone_map.keys()))
-    zone_type = zone_selection
-    zone_name_en = zone_map[zone_selection]
     
-    with st.expander("🛡️ 地面参数", expanded=True):
-        dcof_input = st.slider("DCOF 摩擦系数", 0.0, 1.0, 0.42, 0.01)
+    # 基础参数
+    zone_selection = st.selectbox("空间类型", ['普通走廊 (Corridor)', '卫生间 (Bathroom)', '室外坡道 (Outdoor Ramp)', '康复水疗 (Therapy Pool)', '餐厅 (Dining)'])
+    
+    with st.expander("🛡️ 物理安全参数", expanded=False):
+        dcof_input = st.slider("DCOF 摩擦系数", 0.0, 1.0, 0.42)
         r_value_input = st.select_slider("DIN 防滑等级", options=[9, 10, 11, 12, 13], value=9)
-    
-    with st.expander("💡 光环境参数"):
-        lux_input = st.number_input("当前照度 (Lux)", value=300, step=10)
-        adj_lux_input = st.number_input("相邻区域照度 (Lux)", value=100, step=10)
-    
-    with st.expander("📐 空间几何"):
-        slope_percent = st.number_input("坡度百分比 (%)", value=0.0, step=0.1)
-        slope_ratio = slope_percent / 100.0
-        turning_dia = st.number_input("回转直径 (mm)", value=1500, step=50)
-    
-    st.markdown("---")
-    run_audit = st.button("🚀 启动审查", type="primary")
+        lux_input = st.number_input("当前照度 (Lux)", value=300)
+        adj_lux_input = st.number_input("相邻区域照度 (Lux)", value=100)
+        turning_dia = st.number_input("回转直径 (mm)", value=1500)
+        slope_percent = st.number_input("坡度百分比 (%)", value=0.0)
+
+    # === 🔥 新增输入: 疗愈感知参数 ===
+    with st.expander("🧠 疗愈感知参数 (Psychosocial)", expanded=True):
+        st.caption("基于孙晶晶/SRT 理论框架")
+        material_count = st.slider("主要材质数量 (感官熵)", 1, 10, 4, help="建议值 3-5 种 (Berlyne)")
+        nature_ratio = st.slider("自然景观占比 (绿视率)", 0.0, 1.0, 0.35, help="视野内绿色植物占比")
+        care_dist = st.number_input("看护-游乐距离 (m)", value=8.0, help="代际互动距离，建议 6-15m")
+        shade_coverage = st.slider("有效阴影覆盖率", 0.0, 1.0, 0.5, help="SCUT地域修正：针对广州炎热气候")
+
+    run_audit = st.button("🚀 启动全面审查", type="primary")
 
 if run_audit:
+    # 实例化所有审计官
     floor_auditor = FloorSafetyAudit()
     light_auditor = LightingAudit()
     space_auditor = SpatialAudit()
+    healing_auditor = HealingAudit() # New Instance
 
-    res_floor = floor_auditor.audit_material(zone_type, slope_ratio, dcof_input, r_value_input)
-    res_light = light_auditor.audit_space_lighting(zone_type, lux_input, adj_lux_input)
+    # 执行计算
+    res_floor = floor_auditor.audit_material(zone_selection, slope_percent/100, dcof_input, r_value_input)
+    res_light = light_auditor.audit_space_lighting(zone_selection, lux_input, adj_lux_input)
     res_turn = space_auditor.audit_turning_circle(turning_dia)
-    res_slope = space_auditor.audit_ramp_slope(slope_ratio)
+    # 执行疗愈计算
+    res_healing = healing_auditor.calculate_healing_score(material_count, nature_ratio, care_dist, shade_coverage)
 
-    st.subheader(f"📊 审计报告：{zone_type}")
+    # 结果展示
+    st.divider()
+    t1, t2, t3, t4 = st.tabs(["🛡️ 地面安全", "💡 光环境", "📐 空间尺度", "🧠 心灵疗愈"])
     
-    tab1, tab2, tab3 = st.tabs(["🛡️ 地面安全", "💡 光环境", "📐 空间尺度"])
-    
-    with tab1:
-        c1, c2 = st.columns(2)
-        floor_state = "normal" if res_floor['status'] == 'PASS' else "inverse"
-        c1.metric("实测 DCOF", f"{dcof_input}", delta="达标" if res_floor['status'] == 'PASS' else "-不达标", delta_color=floor_state)
-        c2.metric("要求阈值", f"{res_floor['requirements']['min_dcof']:.2f}")
-        if res_floor['status'] == 'PASS':
-            st.success("✅ 地面材质符合 EBD 标准")
-        else:
-            st.error("🚨 **未通过**")
-            for log in res_floor['log']: st.markdown(f"- {log}")
-            st.info(f"参考: {res_floor['requirements']['standard_ref']}")
+    with t1:
+        st.metric("状态", res_floor['status'], f"DCOF {dcof_input}")
+        for l in res_floor['log']: st.info(l)
 
-    with tab2:
-        c1, c2 = st.columns(2)
-        light_state = "normal" if res_light['status'] == 'PASS' else "inverse"
-        c1.metric("实测照度", f"{lux_input} Lx", delta="舒适" if res_light['status'] == 'PASS' else "-风险", delta_color=light_state)
-        c2.metric("目标照度", f"{res_light.get('target_lux')} Lx")
-        if res_light['status'] == 'PASS':
-            st.success("✅ 光环境适宜")
-        else:
-            st.error("🚨 **未通过**")
-            for log in res_light['log']: st.markdown(f"- {log}")
+    with t2:
+        st.metric("状态", res_light['status'], f"{lux_input} Lx")
+        for l in res_light['log']: st.info(l)
+        
+    with t3:
+        st.metric("回转", res_turn['status'], f"{turning_dia} mm")
+        if res_turn['status'] == 'FAIL': st.error(res_turn['log'][0])
+        else: st.success("符合无障碍通行标准")
 
-    with tab3:
-        if res_turn['status'] == 'FAIL':
-            st.error(f"❌ {res_turn['log'][0]}")
-        else:
-            st.success(f"✅ 轮椅回转空间充足 ({turning_dia}mm)")
-        if res_slope['status'] == 'FAIL':
-            st.error(f"❌ {res_slope['log'][0]}")
-        elif res_slope['status'] == 'WARNING':
-            st.warning(f"⚠ {res_slope['log'][0]}")
-        else:
-            st.success("✅ 坡度设计极佳")
+    # === 🔥 新增展示: 疗愈结果 ===
+    with t4:
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            # 动态颜色
+            grade_color = "normal"
+            if res_healing['grade'] == 'S': grade_color = "normal" # Streamlit metric doesn't allow custom colors easily, relying on delta
+            
+            st.metric("SCUT疗愈指数", f"{res_healing['score']} 分", f"评级: {res_healing['grade']}")
+        
+        with c2:
+            st.caption("综合疗愈效能进度")
+            st.progress(res_healing['score'] / 100)
+            
+            if res_healing['grade'] == 'S':
+                st.success("🌟 S级空间！完美的疗愈环境，符合所有循证设计指标。")
+            elif res_healing['grade'] == 'A':
+                st.info("✨ A级空间 - 表现优秀，部分细节可微调。")
+            else:
+                st.warning("⚠️ B级空间 - 体验有待优化，请关注下方建议。")
+            
+            # 显示详细日志
+            for log in res_healing['log']:
+                if "✅" in log: st.success(log)
+                elif "🚨" in log: st.error(log)
+                else: st.warning(log)
 
-    st.markdown("---")
+    # PDF 生成上下文构建
     pdf_context = {
-        'zone_name': zone_name_en,
-        'inputs': {'dcof': dcof_input, 'r_value': r_value_input, 'lux': lux_input, 'turn': turning_dia},
-        'res_floor': res_floor,
-        'res_light': res_light,
-        'res_turn': res_turn
+        'zone_name': zone_selection,
+        'inputs': {'dcof': dcof_input, 'lux': lux_input, 'turn': turning_dia},
+        'res_floor': res_floor, 
+        'res_light': res_light, 
+        'res_turn': res_turn, 
+        'res_healing': res_healing # 将疗愈结果传入 PDF 引擎
     }
+    
     pdf_file = generate_audit_report_pdf(pdf_context)
     
-    col_l, col_m, col_r = st.columns([1, 2, 1])
-    with col_m:
-        st.success("📄 报告已生成完毕")
-        st.download_button(
-            label="📥 下载 PDF 正式审查报告 (SCUT Certified)",
-            data=pdf_file,
-            file_name=f"EBD_Audit_{datetime.datetime.now().strftime('%Y%m%d')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-else:
-    st.info("👈 请在左侧输入参数并点击“启动审查”")
-    st.markdown("""
-    <div style="text-align: center; color: #6B7280; padding: 40px;">
-        <h3>系统就绪</h3>
-        <p>支持国标 / ADA / JAMA 循证审查标准</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.download_button(
+        label="📥 下载完整版 EBD 报告 (含疗愈分析)", 
+        data=pdf_file, 
+        file_name=f"SCUT_EBD_Report_{datetime.datetime.now().strftime('%Y%m%d')}.pdf", 
+        mime="application/pdf", 
+        use_container_width=True
+    )
